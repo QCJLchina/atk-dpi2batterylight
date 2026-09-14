@@ -1,0 +1,10 @@
+# Local diagnostics and generated binaries
+HidScan.cs
+HidScan.exe
+U2Probe.exe
+U2BatteryLight-new.exe
+dumps/
+
+# Portable runtime configuration
+U2BatteryLight.ini
+U2BatteryLight-v1.0.2/U2BatteryLight.ini

@@ -17,8 +17,8 @@ using Microsoft.Win32.SafeHandles;
 [assembly: System.Reflection.AssemblyDescription("ATK U2 Ultimate 2.4G battery indicator using the DPI LED")]
 [assembly: System.Reflection.AssemblyCompany("Portable Utility")]
 [assembly: System.Reflection.AssemblyProduct("U2 Battery Light")]
-[assembly: System.Reflection.AssemblyVersion("1.0.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.2.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.3.0")]
 
 namespace U2BatteryLight
 {
@@ -88,8 +88,49 @@ namespace U2BatteryLight
                 File.WriteAllText(args[1], report.ToString(), new UTF8Encoding(false));
                 return;
             }
+            if (args.Length >= 5 && args[0].Equals("--set-effect", StringComparison.OrdinalIgnoreCase))
+            {
+                var report = new StringBuilder();
+                int mode = int.Parse(args[1], CultureInfo.InvariantCulture);
+                int brightness = int.Parse(args[2], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                int speed = int.Parse(args[3], CultureInfo.InvariantCulture);
+                bool on = args[4] != "0";
+                using (var p = new U2Protocol())
+                {
+                    try
+                    {
+                        p.FindAndReadAsync().GetAwaiter().GetResult();
+                        p.WriteEffectAsync(mode, brightness, speed, on).GetAwaiter().GetResult();
+                        U2Protocol.EffectConfig eff = p.ReadEffectAsync().GetAwaiter().GetResult();
+                        report.AppendLine("WRITE_OK mode=" + eff.Mode + " bright=0x" + eff.Brightness.ToString("X2") + " speed=" + eff.Speed + " on=" + (eff.On ? 1 : 0));
+                    }
+                    catch (Exception ex) { report.AppendLine("ERROR=" + ex.Message); Environment.ExitCode = 2; }
+                }
+                File.WriteAllText(args[5], report.ToString(), new UTF8Encoding(false));
+                return;
+            }
             bool created;
-            using (var mutex = new Mutex(true, "ATK-U2-Battery-Light-{BF18F777-281E-4E22-9C59-92CE07187BCB}", out created))
+            if (args.Length >= 2 && args[0].Equals("--eeprom-dump", StringComparison.OrdinalIgnoreCase))
+            {
+                var report = new StringBuilder();
+                using (var p = new U2Protocol())
+                {
+                    try
+                    {
+                        MouseSnapshot s = p.FindAndReadAsync().GetAwaiter().GetResult();
+                        report.AppendLine("PID=" + s.ProductId.ToString("X4"));
+                        for (int addr = 0; addr < 128; addr += 10)
+                        {
+                            byte[] data = p.ReadEepromAsync(addr, 10).GetAwaiter().GetResult();
+                            report.AppendLine(addr.ToString("X2") + ": " + BitConverter.ToString(data));
+                        }
+                    }
+                    catch (Exception ex) { report.AppendLine("ERROR=" + ex); Environment.ExitCode = 2; }
+                }
+                File.WriteAllText(args[1], report.ToString(), new UTF8Encoding(false));
+                return;
+            }
+            using (var mutex = new Mutex(true, "ATK-U2-Battery-Light-v1.0.3-{BF18F777-281E-4E22-9C59-92CE07187BCB}", out created))
             {
                 if (!created)
                 {
@@ -115,6 +156,10 @@ namespace U2BatteryLight
         public bool RunAtStartup = false;
         public bool MinimizeToTray = true;
         public bool RestoreOnExit = true;
+        public int EffectMode = 1;
+        public int EffectBrightness = 16;
+        public int EffectSpeed = 1;
+        public bool EffectOn = true;
         public string DeviceSignature = "";
         public readonly Dictionary<int, string> Backups = new Dictionary<int, string>();
 
@@ -149,6 +194,10 @@ namespace U2BatteryLight
                     else if (k == "RunAtStartup" && bool.TryParse(v, out b)) s.RunAtStartup = b;
                     else if (k == "MinimizeToTray" && bool.TryParse(v, out b)) s.MinimizeToTray = b;
                     else if (k == "RestoreOnExit" && bool.TryParse(v, out b)) s.RestoreOnExit = b;
+                    else if (k == "EffectMode" && int.TryParse(v, out n)) s.EffectMode = n;
+                    else if (k == "EffectBrightness" && int.TryParse(v, out n)) s.EffectBrightness = n;
+                    else if (k == "EffectSpeed" && int.TryParse(v, out n)) s.EffectSpeed = n;
+                    else if (k == "EffectOn" && bool.TryParse(v, out b)) s.EffectOn = b;
                     else if (k == "DeviceSignature") s.DeviceSignature = v;
                     else if (k.StartsWith("Backup."))
                     {
@@ -178,6 +227,10 @@ namespace U2BatteryLight
             lines.Add("RunAtStartup=" + RunAtStartup);
             lines.Add("MinimizeToTray=" + MinimizeToTray);
             lines.Add("RestoreOnExit=" + RestoreOnExit);
+            lines.Add("EffectMode=" + EffectMode);
+            lines.Add("EffectBrightness=" + EffectBrightness);
+            lines.Add("EffectSpeed=" + EffectSpeed);
+            lines.Add("EffectOn=" + EffectOn);
             lines.Add("DeviceSignature=" + DeviceSignature);
             foreach (var kv in Backups.OrderBy(x => x.Key)) lines.Add("Backup." + kv.Key + "=" + kv.Value);
             File.WriteAllLines(ConfigPath, lines.ToArray(), new UTF8Encoding(false));
@@ -373,6 +426,40 @@ namespace U2BatteryLight
             int sum = 8;
             for (int i = 0; i < 15; i++) sum += f[i];
             f[15] = (byte)((85 - (sum & 0xFF)) & 0xFF);
+        }
+
+        public const int EffectAddress = 76; // 0x4C: 灯效配置区（4 组 2 字节记录：值 + 校验 0x55-value）
+
+        public sealed class EffectConfig
+        {
+            public int Mode;        // 1=常亮 2=呼吸
+            public int Brightness;  // 0x10=最暗 0x80=中等 0xFF=最亮
+            public int Speed;       // 1=最慢 3=中等 5=最快
+            public bool On;
+        }
+
+        private static byte EffectChecksum(byte value) { return (byte)((0x55 - value) & 0xFF); }
+
+        public async Task<EffectConfig> ReadEffectAsync()
+        {
+            byte[] f = await ReadEepromAsync(EffectAddress, 8);
+            return new EffectConfig
+            {
+                Mode = f[0],
+                Brightness = f[2],
+                Speed = f[4],
+                On = f[6] != 0
+            };
+        }
+
+        public async Task WriteEffectAsync(int mode, int brightness, int speed, bool on)
+        {
+            byte[] f = new byte[8];
+            f[0] = (byte)mode; f[1] = EffectChecksum(f[0]);
+            f[2] = (byte)brightness; f[3] = EffectChecksum(f[2]);
+            f[4] = (byte)speed; f[5] = EffectChecksum(f[4]);
+            f[6] = (byte)(on ? 1 : 0); f[7] = EffectChecksum(f[6]);
+            await WriteEepromAsync(EffectAddress, f);
         }
 
         public static byte[] SetPairColor(byte[] block, int slot, Color color)
@@ -581,6 +668,12 @@ namespace U2BatteryLight
         private readonly Button btnGreen = new Button();
         private readonly Button btnYellow = new Button();
         private readonly Button btnRed = new Button();
+        private readonly ComboBox cboEffectMode = new ComboBox();
+        private readonly ComboBox cboBrightness = new ComboBox();
+        private readonly ComboBox cboSpeed = new ComboBox();
+        private readonly Button btnApplyEffect = new Button();
+        private readonly Label lblEffectState = new Label();
+        private bool suppressEffectEvents;
         private readonly System.Windows.Forms.Timer reconnectTimer = new System.Windows.Forms.Timer();
         private Icon batteryTrayIcon;
         private bool monitoring;
@@ -598,9 +691,9 @@ namespace U2BatteryLight
         public MainForm(bool startMinimized)
         {
             settings = AppSettings.Load();
-            Text = "U2 电量灯 1.0.2";
-            ClientSize = new Size(520, 690);
-            MinimumSize = new Size(536, 720);
+            Text = "U2 电量灯 1.0.3";
+            ClientSize = new Size(520, 824);
+            MinimumSize = new Size(536, 854);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Bg;
             Font = new Font("Microsoft YaHei UI", 9F);
@@ -629,10 +722,17 @@ namespace U2BatteryLight
             };
             Shown += async delegate
             {
-                if (startMinimized || (settings.AutoMonitor && settings.MinimizeToTray))
+                if (startMinimized)
                 {
                     Hide();
                     ShowInTaskbar = false;
+                }
+                else
+                {
+                    ShowInTaskbar = true;
+                    Show();
+                    WindowState = FormWindowState.Normal;
+                    Activate();
                 }
                 await RefreshDeviceAsync();
                 reconnectTimer.Start();
@@ -675,7 +775,26 @@ namespace U2BatteryLight
             writeTip.Size = new Size(230, 48);
             thresholdCard.Controls.Add(writeTip);
 
-            var optionsCard = MakeCard(new Rectangle(22, 459, 476, 132));
+            var effectCard = MakeCard(new Rectangle(22, 459, 476, 132));
+            effectCard.Controls.Add(MakeSectionTitle("灯效设置", 18, 14));
+            SetupCombo(cboEffectMode, new Rectangle(20, 50, 92, 28));
+            cboEffectMode.Items.AddRange(new object[] { "常亮", "呼吸", "关闭" });
+            SetupCombo(cboBrightness, new Rectangle(130, 50, 92, 28));
+            cboBrightness.Items.AddRange(new object[] { "亮度最暗", "亮度中等", "亮度最亮" });
+            SetupCombo(cboSpeed, new Rectangle(240, 50, 92, 28));
+            cboSpeed.Items.AddRange(new object[] { "速度最慢", "速度中等", "速度最快" });
+            effectCard.Controls.Add(cboEffectMode); effectCard.Controls.Add(cboBrightness); effectCard.Controls.Add(cboSpeed);
+            btnApplyEffect.Text = "应用灯效";
+            StyleSecondary(btnApplyEffect, new Rectangle(348, 49, 112, 32));
+            btnApplyEffect.Cursor = Cursors.Hand;
+            btnApplyEffect.Click += async delegate { await ApplyEffectAsync(); };
+            effectCard.Controls.Add(btnApplyEffect);
+            lblEffectState.Text = "连接设备后显示当前灯效；修改后点“应用灯效”写入。";
+            lblEffectState.ForeColor = Muted; lblEffectState.AutoSize = true; lblEffectState.Location = new Point(20, 96);
+            effectCard.Controls.Add(lblEffectState);
+            cboEffectMode.SelectedIndexChanged += delegate { UpdateEffectControlState(); };
+
+            var optionsCard = MakeCard(new Rectangle(22, 607, 476, 132));
             optionsCard.Controls.Add(MakeSectionTitle("运行设置", 18, 14));
             optionsCard.Controls.Add(MakeLabel("刷新间隔", 20, 52, 65));
             SetupIntervalTextBox();
@@ -686,13 +805,13 @@ namespace U2BatteryLight
             SetupCheck(chkRestoreExit, "退出时恢复原色", 20, 88);
             optionsCard.Controls.Add(chkStartup); optionsCard.Controls.Add(chkTray); optionsCard.Controls.Add(chkRestoreExit);
 
-            btnToggle.Text = "开始监控"; StylePrimary(btnToggle, new Rectangle(22, 611, 180, 46));
+            btnToggle.Text = "开始监控"; StylePrimary(btnToggle, new Rectangle(22, 755, 180, 46));
             btnToggle.Click += async delegate { if (monitoring) await StopMonitoringAsync(true); else await StartMonitoringAsync(); };
-            btnRefresh.Text = "刷新"; StyleSecondary(btnRefresh, new Rectangle(214, 611, 88, 46));
+            btnRefresh.Text = "刷新"; StyleSecondary(btnRefresh, new Rectangle(214, 755, 88, 46));
             btnRefresh.Click += async delegate { await RefreshDeviceAsync(); };
-            btnRestore.Text = "恢复原色"; StyleSecondary(btnRestore, new Rectangle(312, 611, 88, 46));
+            btnRestore.Text = "恢复原色"; StyleSecondary(btnRestore, new Rectangle(312, 755, 88, 46));
             btnRestore.Click += async delegate { await RestoreAsync(true); };
-            btnRecapture.Text = "重录"; StyleSecondary(btnRecapture, new Rectangle(410, 611, 88, 46));
+            btnRecapture.Text = "重录"; StyleSecondary(btnRecapture, new Rectangle(410, 755, 88, 46));
             btnRecapture.Click += async delegate { await RecaptureAsync(); };
             Controls.Add(btnToggle); Controls.Add(btnRefresh); Controls.Add(btnRestore); Controls.Add(btnRecapture);
 
@@ -802,6 +921,86 @@ namespace U2BatteryLight
             btnGreen.BackColor = AppSettings.ParseColor(settings.Green); btnGreen.ForeColor = Contrast(btnGreen.BackColor);
             btnYellow.BackColor = AppSettings.ParseColor(settings.Yellow); btnYellow.ForeColor = Contrast(btnYellow.BackColor);
             btnRed.BackColor = AppSettings.ParseColor(settings.Red); btnRed.ForeColor = Contrast(btnRed.BackColor);
+            suppressEffectEvents = true;
+            cboEffectMode.SelectedIndex = !settings.EffectOn ? 2 : (settings.EffectMode == 2 ? 1 : 0);
+            cboBrightness.SelectedIndex = BrightnessToIndex(settings.EffectBrightness);
+            cboSpeed.SelectedIndex = SpeedToIndex(settings.EffectSpeed);
+            suppressEffectEvents = false;
+            UpdateEffectControlState();
+        }
+
+        private static void SetupCombo(ComboBox c, Rectangle bounds)
+        {
+            c.Bounds = bounds;
+            c.DropDownStyle = ComboBoxStyle.DropDownList;
+            c.FlatStyle = FlatStyle.Flat;
+            c.BackColor = Color.White;
+            c.ForeColor = Ink;
+            c.Font = new Font("Microsoft YaHei UI", 9F);
+        }
+
+        private void UpdateEffectControlState()
+        {
+            if (suppressEffectEvents || cboEffectMode.SelectedIndex < 0) return;
+            bool off = cboEffectMode.SelectedIndex == 2;
+            bool breathing = cboEffectMode.SelectedIndex == 1;
+            cboBrightness.Enabled = !off;
+            cboSpeed.Enabled = breathing;
+            btnApplyEffect.Enabled = !off || cboEffectMode.Enabled;
+        }
+
+        private static int BrightnessToIndex(int value) { return value >= 0xC0 ? 2 : (value >= 0x40 ? 1 : 0); }
+        private static int BrightnessFromIndex(int index) { return index <= 0 ? 0x10 : (index == 1 ? 0x80 : 0xFF); }
+        private static int SpeedToIndex(int value) { return value >= 4 ? 2 : (value >= 2 ? 1 : 0); }
+        private static int SpeedFromIndex(int index) { return index <= 0 ? 1 : (index == 1 ? 3 : 5); }
+
+        private async Task LoadEffectFromDeviceAsync()
+        {
+            try
+            {
+                U2Protocol.EffectConfig eff = await protocol.ReadEffectAsync();
+                suppressEffectEvents = true;
+                cboEffectMode.SelectedIndex = !eff.On ? 2 : (eff.Mode == 2 ? 1 : 0);
+                cboBrightness.SelectedIndex = BrightnessToIndex(eff.Brightness);
+                cboSpeed.SelectedIndex = SpeedToIndex(eff.Speed);
+                suppressEffectEvents = false;
+                UpdateEffectControlState();
+                settings.EffectMode = eff.Mode;
+                settings.EffectBrightness = eff.Brightness;
+                settings.EffectSpeed = eff.Speed;
+                settings.EffectOn = eff.On;
+                try { settings.Save(); } catch { }
+                lblEffectState.Text = "当前设备灯效：" + (!eff.On ? "关闭" : (eff.Mode == 2 ? "呼吸" : "常亮"));
+            }
+            catch { }
+        }
+
+        private async Task ApplyEffectAsync()
+        {
+            if (busy) return;
+            if (cboEffectMode.SelectedIndex < 0 || cboBrightness.SelectedIndex < 0 || cboSpeed.SelectedIndex < 0) return;
+            busy = true; SetControls(false);
+            try
+            {
+                int modeIndex = cboEffectMode.SelectedIndex;
+                bool on = modeIndex != 2;
+                int mode = modeIndex == 1 ? 2 : 1;
+                int brightness = BrightnessFromIndex(cboBrightness.SelectedIndex);
+                int speed = SpeedFromIndex(cboSpeed.SelectedIndex);
+                if (String.IsNullOrEmpty(protocol.DevicePath)) await protocol.FindAndReadAsync();
+                await protocol.WriteEffectAsync(mode, brightness, speed, on);
+                settings.EffectMode = mode;
+                settings.EffectBrightness = brightness;
+                settings.EffectSpeed = speed;
+                settings.EffectOn = on;
+                try { settings.Save(); } catch { }
+                lblEffectState.Text = "已写入：" + (on ? (mode == 2 ? "呼吸" : "常亮") : "关闭");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "灯效写入失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally { busy = false; SetControls(true); }
         }
 
         private void SettingsChanged(object sender, EventArgs e)
@@ -897,6 +1096,7 @@ namespace U2BatteryLight
                 UpdateBatteryUi(snap.Battery);
                 lblDetail.Text = "U2 Ultimate · 8K 接收器 PID " + snap.ProductId.ToString("X4") + " · DPI " + (snap.CurrentDpi + 1) + "/" + snap.DpiCount;
                 SetStatus("● 已连接", Color.FromArgb(22, 163, 74));
+                await LoadEffectFromDeviceAsync();
             }
             catch (Exception ex)
             {
@@ -1127,6 +1327,7 @@ namespace U2BatteryLight
         private void SetControls(bool enabled)
         {
             btnToggle.Enabled = enabled; btnRefresh.Enabled = enabled; btnRestore.Enabled = enabled; btnRecapture.Enabled = enabled;
+            btnApplyEffect.Enabled = enabled;
         }
 
         private async void OnFormClosing(object sender, FormClosingEventArgs e)

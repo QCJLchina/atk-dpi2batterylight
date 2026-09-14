@@ -10,13 +10,15 @@
   - 16–75%：黄色
   - 0–15%：红色
 - 阈值和颜色均可在界面中自定义
+- 支持 DPI 灯效常亮、呼吸和关闭模式
+- 支持常亮亮度、呼吸速度调节，并保存设备灯效配置
 - 每 45 秒刷新一次，只在跨越颜色区间或颜色被 ATK HUB 覆盖时才写入，尽量减少对鼠标的写入
 - 关闭窗口默认最小化到系统托盘，双击托盘图标可重新打开，从托盘菜单退出
 - 退出时默认恢复原来的 DPI 颜色
 
 ## 下载使用
 
-仓库内 `U2BatteryLight-v1.0.2/U2BatteryLight.exe` 为已编译好的可执行文件，也可到 [Releases](../../releases) 页面下载。
+仓库内 `U2BatteryLight-v1.0.3/U2BatteryLight.exe` 为已编译好的可执行文件，也可到 [Releases](../../releases) 页面下载。
 
 1. 将 `U2BatteryLight.exe` 放在一个可写的普通文件夹中并运行。
 2. 确认鼠标处于 2.4G 模式、8K 接收器已连接。
@@ -55,8 +57,8 @@ csc /target:winexe /platform:anycpu /win32manifest:app.manifest ^
 ```
 ├── Program.cs                      # 全部源码（WinForms 单文件）
 ├── app.manifest                    # 应用清单
-└── U2BatteryLight-v1.0.2/
-    ├── U2BatteryLight.exe          # 已编译可执行文件（v1.0.2）
+└── U2BatteryLight-v1.0.3/
+    ├── U2BatteryLight.exe          # 已编译可执行文件（v1.0.3）
     └── README-U2电量灯.md          # 随版本附带的中文说明
 ```
 
