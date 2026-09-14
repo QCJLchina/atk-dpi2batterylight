@@ -1,0 +1,78 @@
+name: 构建并发布 U2 Battery Light
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布标签，例如 v1.0.3"
+        required: true
+        default: "v1.0.3"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 编译并打包
+        shell: pwsh
+        run: |
+          $csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (!(Test-Path -LiteralPath $csc)) {
+            throw "找不到 .NET Framework C# 编译器：$csc"
+          }
+
+          $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            "${{ inputs.tag }}"
+          } else {
+            "${{ github.ref_name }}"
+          }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "标签格式必须是 v<主版本>.<次版本>.<修订版本>，当前为：$tag"
+          }
+          $version = $tag.Substring(1)
+          $packageName = "U2BatteryLight-v$version"
+          $packageDir = Join-Path $PWD "dist\$packageName"
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+
+          $output = Join-Path $packageDir "U2BatteryLight.exe"
+          & $csc /nologo /target:winexe /platform:anycpu /win32manifest:app.manifest `
+            /out:$output /r:System.dll /r:System.Core.dll /r:System.Drawing.dll `
+            /r:System.Windows.Forms.dll Program.cs
+          if ($LASTEXITCODE -ne 0) {
+            throw "C# 编译失败，退出码：$LASTEXITCODE"
+          }
+
+          Copy-Item -LiteralPath "README.md" -Destination (Join-Path $packageDir "README.md")
+          $zip = Join-Path $PWD "dist\$packageName.zip"
+          Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $zip -Force
+
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PACKAGE_DIR=$packageDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PACKAGE_ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: 创建或更新 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG `
+              (Join-Path $env:PACKAGE_DIR "U2BatteryLight.exe") `
+              $env:PACKAGE_ZIP --repo $env:GITHUB_REPOSITORY --clobber
+          } else {
+            gh release create $env:RELEASE_TAG `
+              (Join-Path $env:PACKAGE_DIR "U2BatteryLight.exe") `
+              $env:PACKAGE_ZIP --repo $env:GITHUB_REPOSITORY `
+              --title "U2 Battery Light $env:RELEASE_TAG" --generate-notes
+          }

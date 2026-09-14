@@ -45,6 +45,17 @@ csc /target:winexe /platform:anycpu /win32manifest:app.manifest ^
 
 `csc` 可在 "适用于 VS 的开发人员命令提示" 中使用，或直接使用 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`。
 
+## GitHub Actions 发布
+
+推送版本标签即可自动构建并发布 Release：
+
+```bat
+git tag v1.0.3
+git push origin main --follow-tags
+```
+
+也可以在 GitHub 的 Actions 页面手动运行“构建并发布 U2 Battery Light”，输入版本标签。
+
 ## 注意事项
 
 - 若同时使用 ATK HUB，ATK HUB 修改 DPI 颜色后，本工具会在下次刷新时重新应用电量颜色。
