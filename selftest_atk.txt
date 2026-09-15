@@ -1,0 +1,19 @@
+ERROR
+System.IO.IOException: 找到 ATK 接口，但无法确认 U2 Ultimate：HID 写入失败，Win32=1 ---> System.IO.IOException: HID 写入失败，Win32=1
+   在 U2BatteryLight.HidNative.Write(SafeFileHandle handle, Byte[] buffer)
+   在 U2BatteryLight.U2Protocol.<>c__DisplayClass2a.<ExchangeAsync>b__25()
+   在 System.Threading.Tasks.Task`1.InnerInvoke()
+   在 System.Threading.Tasks.Task.Execute()
+--- 引发异常的上一位置中堆栈跟踪的末尾 ---
+   在 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+   在 System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+   在 U2BatteryLight.U2Protocol.<ExchangeAsync>d__2c.MoveNext()
+--- 引发异常的上一位置中堆栈跟踪的末尾 ---
+   在 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+   在 U2BatteryLight.U2Protocol.<FindAndReadAsync>d__7.MoveNext()
+   --- 内部异常堆栈跟踪的结尾 ---
+   在 U2BatteryLight.U2Protocol.<FindAndReadAsync>d__7.MoveNext()
+--- 引发异常的上一位置中堆栈跟踪的末尾 ---
+   在 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+   在 System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+   在 U2BatteryLight.Program.Main(String[] args)

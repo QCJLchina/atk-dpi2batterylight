@@ -13,12 +13,12 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
-[assembly: System.Reflection.AssemblyTitle("U2 电量灯")]
+[assembly: System.Reflection.AssemblyTitle("鼠标电量灯")]
 [assembly: System.Reflection.AssemblyDescription("ATK U2 Ultimate 2.4G battery indicator using the DPI LED")]
 [assembly: System.Reflection.AssemblyCompany("Portable Utility")]
 [assembly: System.Reflection.AssemblyProduct("U2 Battery Light")]
-[assembly: System.Reflection.AssemblyVersion("1.0.3.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.3.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
 
 namespace U2BatteryLight
 {
@@ -31,10 +31,10 @@ namespace U2BatteryLight
             {
                 try
                 {
-                    using (var p = new U2Protocol())
-                    {
-                        MouseSnapshot s = p.FindAndReadAsync().GetAwaiter().GetResult();
-                        File.WriteAllText(args[1],
+                using (var p = MouseProtocol.ConnectAsync().GetAwaiter().GetResult())
+                {
+                    MouseSnapshot s = p.FindAndReadAsync().GetAwaiter().GetResult();
+                    File.WriteAllText(args[1],
                             "OK\r\nPID=" + s.ProductId.ToString("X4") +
                             "\r\nCIDMID=" + s.Cid + "," + s.Mid +
                             "\r\nBattery=" + s.Battery.Percent +
@@ -51,7 +51,7 @@ namespace U2BatteryLight
             if (args.Length >= 2 && args[0].Equals("--color-cycle-test", StringComparison.OrdinalIgnoreCase))
             {
                 var report = new StringBuilder();
-                using (var p = new U2Protocol())
+                using (var p = MouseProtocol.ConnectAsync().GetAwaiter().GetResult())
                 {
                     byte[] original = null;
                     try
@@ -61,8 +61,8 @@ namespace U2BatteryLight
                         report.AppendLine("PID=" + s.ProductId.ToString("X4"));
                         report.AppendLine("ORIGINAL=" + BitConverter.ToString(original));
                         Thread.Sleep(5000);
-                        byte[] green = U2Protocol.SetPairColor(original, 0, Color.FromArgb(0, 208, 96));
-                        green = U2Protocol.SetPairColor(green, 1, Color.FromArgb(0, 208, 96));
+                        byte[] green = MouseProtocol.SetPairColor(original, 0, Color.FromArgb(0, 208, 96));
+                        green = MouseProtocol.SetPairColor(green, 1, Color.FromArgb(0, 208, 96));
                         p.WriteEepromAsync(44, green).GetAwaiter().GetResult();
                         byte[] changed = p.ReadEepromAsync(44, 8).GetAwaiter().GetResult();
                         report.AppendLine("CHANGED=" + BitConverter.ToString(changed));
@@ -88,20 +88,20 @@ namespace U2BatteryLight
                 File.WriteAllText(args[1], report.ToString(), new UTF8Encoding(false));
                 return;
             }
-            if (args.Length >= 5 && args[0].Equals("--set-effect", StringComparison.OrdinalIgnoreCase))
+            if (args.Length >= 6 && args[0].Equals("--set-effect", StringComparison.OrdinalIgnoreCase))
             {
                 var report = new StringBuilder();
                 int mode = int.Parse(args[1], CultureInfo.InvariantCulture);
                 int brightness = int.Parse(args[2], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
                 int speed = int.Parse(args[3], CultureInfo.InvariantCulture);
                 bool on = args[4] != "0";
-                using (var p = new U2Protocol())
+                using (var p = MouseProtocol.ConnectAsync().GetAwaiter().GetResult())
                 {
                     try
                     {
                         p.FindAndReadAsync().GetAwaiter().GetResult();
                         p.WriteEffectAsync(mode, brightness, speed, on).GetAwaiter().GetResult();
-                        U2Protocol.EffectConfig eff = p.ReadEffectAsync().GetAwaiter().GetResult();
+                        MouseProtocol.EffectConfig eff = p.ReadEffectAsync().GetAwaiter().GetResult();
                         report.AppendLine("WRITE_OK mode=" + eff.Mode + " bright=0x" + eff.Brightness.ToString("X2") + " speed=" + eff.Speed + " on=" + (eff.On ? 1 : 0));
                     }
                     catch (Exception ex) { report.AppendLine("ERROR=" + ex.Message); Environment.ExitCode = 2; }
@@ -113,7 +113,7 @@ namespace U2BatteryLight
             if (args.Length >= 2 && args[0].Equals("--eeprom-dump", StringComparison.OrdinalIgnoreCase))
             {
                 var report = new StringBuilder();
-                using (var p = new U2Protocol())
+                using (var p = MouseProtocol.ConnectAsync().GetAwaiter().GetResult())
                 {
                     try
                     {
@@ -130,11 +130,11 @@ namespace U2BatteryLight
                 File.WriteAllText(args[1], report.ToString(), new UTF8Encoding(false));
                 return;
             }
-            using (var mutex = new Mutex(true, "ATK-U2-Battery-Light-v1.0.3-{BF18F777-281E-4E22-9C59-92CE07187BCB}", out created))
+            using (var mutex = new Mutex(true, "ATK-U2-Battery-Light-v1.1.0-{BF18F777-281E-4E22-9C59-92CE07187BCB}", out created))
             {
                 if (!created)
                 {
-                    MessageBox.Show("U2 电量灯已经在运行。", "U2 电量灯", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("鼠标电量灯已经在运行。", "鼠标电量灯", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
                 Application.EnableVisualStyles();
@@ -162,6 +162,7 @@ namespace U2BatteryLight
         public bool EffectOn = true;
         public string DeviceSignature = "";
         public readonly Dictionary<int, string> Backups = new Dictionary<int, string>();
+        public string DeviceProfile = "";   // selected profile name; empty = auto-detect
 
         private static string ConfigPath
         {
@@ -199,6 +200,10 @@ namespace U2BatteryLight
                     else if (k == "EffectSpeed" && int.TryParse(v, out n)) s.EffectSpeed = n;
                     else if (k == "EffectOn" && bool.TryParse(v, out b)) s.EffectOn = b;
                     else if (k == "DeviceSignature") s.DeviceSignature = v;
+                    else if (k == "DeviceProfile")
+                    {
+                        if (KnownProfiles.ByName(v) != null) s.DeviceProfile = v;
+                    }
                     else if (k.StartsWith("Backup."))
                     {
                         int addr;
@@ -232,6 +237,7 @@ namespace U2BatteryLight
             lines.Add("EffectSpeed=" + EffectSpeed);
             lines.Add("EffectOn=" + EffectOn);
             lines.Add("DeviceSignature=" + DeviceSignature);
+            lines.Add("DeviceProfile=" + DeviceProfile);
             foreach (var kv in Backups.OrderBy(x => x.Key)) lines.Add("Backup." + kv.Key + "=" + kv.Value);
             File.WriteAllLines(ConfigPath, lines.ToArray(), new UTF8Encoding(false));
         }
@@ -270,27 +276,88 @@ namespace U2BatteryLight
         public int DpiCount;
         public int CurrentDpi;
         public BatteryInfo Battery;
-        public string Signature { get { return ProductId.ToString("X4") + "-" + Cid + "-" + Mid; } }
+        public string Signature { get { return ProfileName + "-" + ProductId.ToString("X4") + "-" + Cid + "-" + Mid + "-" + Path; } }
+        public string ProfileName;
+        public string FriendlyLabel;
     }
 
-    internal sealed class U2Protocol : IDisposable
+    internal sealed class MouseProfile
     {
-        private const int Vid = 0x373B;
-        private const ushort CommandUsagePage = 0xFF02;
-        private const ushort CommandUsage = 2;
-        private const byte ReportId = 8;
+        public string Name;
+        public string Label;
+        public int Vid;
+        public ushort CommandUsagePage;
+        public ushort CommandUsage;
+        public byte ReportId = 8;
+        public int[] ProductIds;          // 0 = accept any PID for this VID
+        public int[] PreferProductIds;    // ordered preferred PIDs when several match
+        public int Cid;
+        public int Mid;
+        public int[] ColorAddresses;      // 4-byte RGB+checksum pairs
+        public int EffectAddress;
+        public int ColorSlotCount { get { return ColorAddresses == null ? 0 : ColorAddresses.Length; } }
+    }
+
+    internal static class KnownProfiles
+    {
+        public static readonly MouseProfile AtkU2 = new MouseProfile
+        {
+            Name = "ATK-U2",
+            Label = "ATK U2 Ultimate",
+            Vid = 0x373B,
+            CommandUsagePage = 0xFF02,
+            CommandUsage = 2,
+            ReportId = 8,
+            ProductIds = new int[] { },
+            PreferProductIds = new int[] { 0x111A, 0x1087 },
+            Cid = 2,
+            Mid = 65,
+            ColorAddresses = new int[] { 44, 52, 60, 68 },
+            EffectAddress = 76
+        };
+        public static readonly MouseProfile Metapanda = new MouseProfile
+        {
+            Name = "Metapanda",
+            Label = "MetapandaMouse",
+            Vid = 0x3554,
+            CommandUsagePage = 0xFF02,
+            CommandUsage = 2,
+            ReportId = 8,
+            ProductIds = new int[] { },
+            PreferProductIds = new int[] { 0xF5A9 },
+            Cid = 0x1D,
+            Mid = 0x02,
+            ColorAddresses = new int[] { 44, 52, 60, 68 },
+            EffectAddress = 76
+        };
+        public static readonly MouseProfile[] All = new MouseProfile[] { AtkU2, Metapanda };
+        public static MouseProfile ByName(string name)
+        {
+            if (String.IsNullOrEmpty(name)) return null;
+            foreach (var p in All) if (String.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) return p;
+            return null;
+        }
+    }
+
+    internal sealed class MouseProtocol : IDisposable
+    {
+        private readonly MouseProfile _profile;
         private string _path;
 
+        public MouseProtocol(MouseProfile profile) { _profile = profile; }
+        public MouseProfile Profile { get { return _profile; } }
         public string DevicePath { get { return _path; } }
 
         public async Task<MouseSnapshot> FindAndReadAsync()
         {
             Exception last = null;
-            var candidates = HidNative.Enumerate(Vid, CommandUsagePage, CommandUsage)
-                .OrderBy(x => x.ProductId == 0x111A ? 0 : x.ProductId == 0x1087 ? 1 : 2)
+            var p = _profile;
+            var candidates = HidNative.Enumerate(p.Vid, p.CommandUsagePage, p.CommandUsage)
+                .Where(x => Array.IndexOf(p.PreferProductIds, x.ProductId) >= 0)
+                .OrderBy(x => Array.IndexOf(p.PreferProductIds, x.ProductId))
                 .ToList();
-            if (candidates.Any(x => x.ProductId == 0x111A))
-                candidates = candidates.Where(x => x.ProductId == 0x111A).ToList();
+            if (p.ProductIds != null && p.ProductIds.Length > 0)
+                candidates = candidates.Where(x => Array.IndexOf(p.ProductIds, x.ProductId) >= 0).ToList();
             foreach (var dev in candidates)
             {
                 for (int attempt = 0; attempt < 2; attempt++)
@@ -304,7 +371,7 @@ namespace U2BatteryLight
                         if (cid[1] != 0 || cid[4] < 2) break;
                         int c = cid[5];
                         int m = cid[6];
-                        if (c != 2 || m != 65) break;
+                        if (c != p.Cid || m != p.Mid) break;
                         byte[] cfg = await ReadEepromAsync(0, 10);
                         var bat = await ReadBatteryAsync();
                         return new MouseSnapshot
@@ -315,7 +382,9 @@ namespace U2BatteryLight
                             Mid = m,
                             DpiCount = Math.Max(1, Math.Min(8, (int)cfg[2])),
                             CurrentDpi = Math.Max(0, Math.Min(7, (int)cfg[4])),
-                            Battery = bat
+                            Battery = bat,
+                            ProfileName = p.Name,
+                            FriendlyLabel = p.Label
                         };
                     }
                     catch (Exception ex)
@@ -326,8 +395,23 @@ namespace U2BatteryLight
                 }
             }
             _path = null;
-            if (last != null) throw new IOException("找到 ATK 接口，但无法确认 U2 Ultimate：" + last.Message, last);
-            throw new IOException("未找到已连接的 ATK U2 Ultimate。请确认鼠标处于 2.4G 模式且接收器已连接。");
+            if (last != null) throw new IOException("找到 " + p.Label + " 接口，但无法确认设备：" + last.Message, last);
+            throw new IOException("未找到已连接的 " + p.Label + "。请确认鼠标处于 2.4G 模式且接收器已连接。");
+        }
+
+        public static async Task<MouseProtocol> ConnectAsync()
+        {
+            foreach (var prof in KnownProfiles.All)
+            {
+                var p = new MouseProtocol(prof);
+                try
+                {
+                    await p.FindAndReadAsync();
+                    if (!String.IsNullOrEmpty(p.DevicePath)) return p;
+                }
+                catch { }
+            }
+            throw new IOException("未找到支持的设备（ATK U2 / MetapandaMouse）。请确认鼠标处于 2.4G 模式且接收器已连接。");
         }
 
         public async Task<BatteryInfo> ReadBatteryAsync()
@@ -347,7 +431,7 @@ namespace U2BatteryLight
         {
             EnsurePath();
             byte[] f = await ExchangeAsync(BuildEeprom(8, address, null, length), 1800);
-            if (f[1] != 0) throw new IOException("EEPROM 读取失败，status=" + f[1] + "，address=" + address);
+            if (f[1] != 0 || f[4] < length) throw new IOException("EEPROM 读取失败，status=" + f[1] + "，address=" + address);
             var data = new byte[length];
             Buffer.BlockCopy(f, 5, data, 0, Math.Min(length, 10));
             return data;
@@ -358,6 +442,8 @@ namespace U2BatteryLight
             EnsurePath();
             byte[] f = await ExchangeAsync(BuildEeprom(7, address, data, data.Length), 1800);
             if (f[1] != 0) throw new IOException("EEPROM 写入失败，status=" + f[1] + "，address=" + address);
+            byte[] actual = await ReadEepromAsync(address, data.Length);
+            if (!actual.SequenceEqual(data)) throw new IOException("写入后校验失败，address=" + address);
         }
 
         public void ClearPath() { _path = null; }
@@ -374,7 +460,7 @@ namespace U2BatteryLight
             {
                 if (handle.IsInvalid) throw new IOException("无法打开 HID 命令通道，Win32=" + Marshal.GetLastWin32Error());
                 var output = new byte[17];
-                output[0] = ReportId;
+                output[0] = _profile.ReportId;
                 Buffer.BlockCopy(frame, 0, output, 1, 16);
                 Task<byte[]> io = Task.Run(delegate
                 {
@@ -382,7 +468,7 @@ namespace U2BatteryLight
                     while (true)
                     {
                         byte[] input = HidNative.Read(handle, 17);
-                        if (input.Length >= 17 && input[0] == ReportId && input[1] == frame[0])
+                        if (input.Length >= 17 && input[0] == _profile.ReportId && input[1] == frame[0])
                         {
                             var result = new byte[16];
                             Buffer.BlockCopy(input, 1, result, 0, 16);
@@ -429,7 +515,6 @@ namespace U2BatteryLight
         }
 
         public const int EffectAddress = 76; // 0x4C: 灯效配置区（4 组 2 字节记录：值 + 校验 0x55-value）
-
         public sealed class EffectConfig
         {
             public int Mode;        // 1=常亮 2=呼吸
@@ -442,7 +527,7 @@ namespace U2BatteryLight
 
         public async Task<EffectConfig> ReadEffectAsync()
         {
-            byte[] f = await ReadEepromAsync(EffectAddress, 8);
+            byte[] f = await ReadEepromAsync(_profile.EffectAddress, 8);
             return new EffectConfig
             {
                 Mode = f[0],
@@ -459,7 +544,7 @@ namespace U2BatteryLight
             f[2] = (byte)brightness; f[3] = EffectChecksum(f[2]);
             f[4] = (byte)speed; f[5] = EffectChecksum(f[4]);
             f[6] = (byte)(on ? 1 : 0); f[7] = EffectChecksum(f[6]);
-            await WriteEepromAsync(EffectAddress, f);
+            await WriteEepromAsync(_profile.EffectAddress, f);
         }
 
         public static byte[] SetPairColor(byte[] block, int slot, Color color)
@@ -648,7 +733,9 @@ namespace U2BatteryLight
     internal sealed class MainForm : Form
     {
         private readonly AppSettings settings;
-        private readonly U2Protocol protocol = new U2Protocol();
+        private MouseProtocol protocol;
+        private readonly ComboBox cboDevice = new ComboBox();
+        private readonly Label lblDevice = new Label();
         private readonly System.Windows.Forms.Timer pollTimer = new System.Windows.Forms.Timer();
         private readonly NotifyIcon tray = new NotifyIcon();
         private readonly Label lblStatus = new Label();
@@ -691,9 +778,11 @@ namespace U2BatteryLight
         public MainForm(bool startMinimized)
         {
             settings = AppSettings.Load();
-            Text = "U2 电量灯 1.0.3";
-            ClientSize = new Size(520, 824);
-            MinimumSize = new Size(536, 854);
+            protocol = new MouseProtocol(KnownProfiles.ByName(settings.DeviceProfile) ?? KnownProfiles.Metapanda);
+            Text = "鼠标电量灯 1.1.0";
+            ClientSize = new Size(520, 918);
+            MinimumSize = new Size(536, 958);
+            AutoScroll = true;
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Bg;
             Font = new Font("Microsoft YaHei UI", 9F);
@@ -717,7 +806,7 @@ namespace U2BatteryLight
                 if (WindowState == FormWindowState.Minimized && settings.MinimizeToTray)
                 {
                     Hide();
-                    tray.ShowBalloonTip(900, "U2 电量灯", "程序仍在托盘运行。", ToolTipIcon.Info);
+                    tray.ShowBalloonTip(900, "鼠标电量灯", "程序仍在托盘运行。", ToolTipIcon.Info);
                 }
             };
             Shown += async delegate
@@ -736,13 +825,13 @@ namespace U2BatteryLight
                 }
                 await RefreshDeviceAsync();
                 reconnectTimer.Start();
-                if (settings.AutoMonitor) await StartMonitoringAsync();
+                // Preview opens read-only; monitoring is explicitly started by the user.
             };
         }
 
         private void BuildUi()
         {
-            var title = new Label { Text = "U2 电量灯", Font = new Font("Microsoft YaHei UI", 20F, FontStyle.Bold), ForeColor = Ink, AutoSize = true, Location = new Point(26, 20) };
+            var title = new Label { Text = "鼠标电量灯", Font = new Font("Microsoft YaHei UI", 20F, FontStyle.Bold), ForeColor = Ink, AutoSize = true, Location = new Point(26, 20) };
             var sub = new Label { Text = "让 DPI 指示灯显示 2.4G 无线电量", ForeColor = Muted, AutoSize = true, Location = new Point(29, 62) };
             Controls.Add(title); Controls.Add(sub);
 
@@ -814,6 +903,33 @@ namespace U2BatteryLight
             btnRecapture.Text = "重录"; StyleSecondary(btnRecapture, new Rectangle(410, 755, 88, 46));
             btnRecapture.Click += async delegate { await RecaptureAsync(); };
             Controls.Add(btnToggle); Controls.Add(btnRefresh); Controls.Add(btnRestore); Controls.Add(btnRecapture);
+
+            foreach (Control control in Controls)
+                if (control.Top >= 92) control.Top += 94;
+            var deviceCard = MakeCard(new Rectangle(22, 92, 476, 78));
+            deviceCard.Controls.Add(MakeSectionTitle("当前鼠标", 18, 10));
+            SetupCombo(cboDevice, new Rectangle(112, 9, 344, 28));
+            cboDevice.Items.AddRange(KnownProfiles.All.Select(p => (object)p.Label).ToArray());
+            cboDevice.SelectedIndex = Array.IndexOf(KnownProfiles.All, protocol.Profile);
+            deviceCard.Controls.Add(cboDevice);
+            lblDevice.Text = "一次监控一只鼠标；停止监控后可切换，原色按设备独立保存。";
+            lblDevice.SetBounds(18, 46, 442, 24);
+            lblDevice.ForeColor = Muted;
+            deviceCard.Controls.Add(lblDevice);
+            cboDevice.SelectedIndexChanged += async delegate
+            {
+                if (initializing || busy || monitoring) return;
+                protocol.Dispose();
+                protocol = new MouseProtocol(KnownProfiles.All[cboDevice.SelectedIndex]);
+                settings.DeviceProfile = protocol.Profile.Name;
+                settings.Backups.Clear();
+                settings.DeviceSignature = "";
+                settings.AutoMonitor = false;
+                settings.Save();
+                appliedZone = "";
+                lblBattery.Text = "--%";
+                await RefreshDeviceAsync();
+            };
 
             numLow.ValueChanged += SettingsChanged;
             numHigh.ValueChanged += SettingsChanged;
@@ -958,7 +1074,7 @@ namespace U2BatteryLight
         {
             try
             {
-                U2Protocol.EffectConfig eff = await protocol.ReadEffectAsync();
+                MouseProtocol.EffectConfig eff = await protocol.ReadEffectAsync();
                 suppressEffectEvents = true;
                 cboEffectMode.SelectedIndex = !eff.On ? 2 : (eff.Mode == 2 ? 1 : 0);
                 cboBrightness.SelectedIndex = BrightnessToIndex(eff.Brightness);
@@ -1060,7 +1176,7 @@ namespace U2BatteryLight
         private void BuildTray()
         {
             UpdateTrayNumber("--");
-            tray.Text = "U2 电量灯";
+            tray.Text = "鼠标电量灯";
             tray.Visible = true;
             tray.DoubleClick += delegate { ShowWindow(); };
             var menu = new ContextMenuStrip();
@@ -1094,7 +1210,7 @@ namespace U2BatteryLight
                 protocol.ClearPath();
                 MouseSnapshot snap = await protocol.FindAndReadAsync();
                 UpdateBatteryUi(snap.Battery);
-                lblDetail.Text = "U2 Ultimate · 8K 接收器 PID " + snap.ProductId.ToString("X4") + " · DPI " + (snap.CurrentDpi + 1) + "/" + snap.DpiCount;
+                lblDetail.Text = snap.FriendlyLabel + " · PID " + snap.ProductId.ToString("X4") + " · DPI " + (snap.CurrentDpi + 1) + "/" + snap.DpiCount;
                 SetStatus("● 已连接", Color.FromArgb(22, 163, 74));
                 await LoadEffectFromDeviceAsync();
             }
@@ -1142,6 +1258,7 @@ namespace U2BatteryLight
             btnToggle.Text = "开始监控"; btnToggle.BackColor = Accent;
             if (restore) await RestoreAsync(false);
             SetStatus("● 已停止", Muted);
+            SetControls(true);
         }
 
         private async Task PollAsync(bool force)
@@ -1150,17 +1267,11 @@ namespace U2BatteryLight
             busy = true;
             try
             {
-                MouseSnapshot snap;
-                if (String.IsNullOrEmpty(protocol.DevicePath)) snap = await protocol.FindAndReadAsync();
-                else
-                {
-                    BatteryInfo b = await protocol.ReadBatteryAsync();
-                    snap = new MouseSnapshot { Battery = b, DpiCount = Math.Max(1, settings.Backups.Count * 2), CurrentDpi = 0, Cid = 2, Mid = 65 };
-                }
+                MouseSnapshot snap = await protocol.FindAndReadAsync();
                 UpdateBatteryUi(snap.Battery);
                 if (monitoring)
                 {
-                    if (settings.Backups.Count == 0) { snap = await protocol.FindAndReadAsync(); await EnsureBackupsAsync(snap); }
+                    await EnsureBackupsAsync(snap);
                     await ApplyForBatteryAsync(snap);
                     SetStatus("● 正在监控", Color.FromArgb(22, 163, 74));
                 }
@@ -1175,6 +1286,15 @@ namespace U2BatteryLight
             finally { busy = false; SetControls(true); }
         }
 
+        private static string BackupPath(MouseSnapshot snap)
+        {
+            using (var hash = System.Security.Cryptography.SHA256.Create())
+            {
+                string key = BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(snap.Signature))).Replace("-", "");
+                return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups", key + ".txt");
+            }
+        }
+
         private async Task EnsureBackupsAsync(MouseSnapshot snap)
         {
             if (settings.DeviceSignature.Length > 0 && settings.DeviceSignature != snap.Signature)
@@ -1182,8 +1302,24 @@ namespace U2BatteryLight
                 settings.Backups.Clear();
                 settings.DeviceSignature = "";
             }
+            string backupFile = BackupPath(snap);
+            if (settings.Backups.Count == 0 && File.Exists(backupFile))
+            {
+                foreach (string line in File.ReadAllLines(backupFile))
+                {
+                    int address;
+                    int separator = line.IndexOf('=');
+                    if (separator > 0 && int.TryParse(line.Substring(0, separator), out address))
+                    {
+                        byte[] data = Convert.FromBase64String(line.Substring(separator + 1));
+                        if (Array.IndexOf(protocol.Profile.ColorAddresses, address) < 0 || data.Length != 8)
+                            throw new IOException("原色备份格式无效。");
+                        settings.Backups[address] = Convert.ToBase64String(data);
+                    }
+                }
+            }
             int blocks = Math.Max(1, (snap.DpiCount + 1) / 2);
-            int[] addresses = { 44, 52, 60, 68 };
+            int[] addresses = protocol.Profile.ColorAddresses;
             for (int i = 0; i < blocks; i++)
             {
                 int addr = addresses[i];
@@ -1194,6 +1330,8 @@ namespace U2BatteryLight
                 }
             }
             settings.DeviceSignature = snap.Signature;
+            Directory.CreateDirectory(Path.GetDirectoryName(backupFile));
+            File.WriteAllLines(backupFile, settings.Backups.Select(kv => kv.Key + "=" + kv.Value).ToArray());
             settings.Save();
         }
 
@@ -1210,11 +1348,11 @@ namespace U2BatteryLight
             foreach (var kv in settings.Backups.OrderBy(x => x.Key))
             {
                 byte[] current = await protocol.ReadEepromAsync(kv.Key, 8);
-                bool correct = U2Protocol.PairHasColor(current, 0, color) && U2Protocol.PairHasColor(current, 1, color);
+                bool correct = MouseProtocol.PairHasColor(current, 0, color) && MouseProtocol.PairHasColor(current, 1, color);
                 if (changed || !correct)
                 {
-                    byte[] desired = U2Protocol.SetPairColor(current, 0, color);
-                    desired = U2Protocol.SetPairColor(desired, 1, color);
+                    byte[] desired = MouseProtocol.SetPairColor(current, 0, color);
+                    desired = MouseProtocol.SetPairColor(desired, 1, color);
                     await protocol.WriteEepromAsync(kv.Key, desired);
                 }
             }
@@ -1230,17 +1368,22 @@ namespace U2BatteryLight
             bool wasBusy = busy; busy = true; SetControls(false);
             try
             {
+                MouseSnapshot currentDevice = await protocol.FindAndReadAsync();
+                if (settings.Backups.Count == 0 && File.Exists(BackupPath(currentDevice)))
+                    await EnsureBackupsAsync(currentDevice);
                 if (settings.Backups.Count == 0) throw new InvalidOperationException("尚未保存原始颜色。");
-                if (String.IsNullOrEmpty(protocol.DevicePath)) await protocol.FindAndReadAsync();
+                if (settings.DeviceSignature != currentDevice.Signature)
+                    throw new IOException("当前鼠标与原色备份不匹配，请重新连接原来的鼠标。");
                 foreach (var kv in settings.Backups.OrderBy(x => x.Key))
                     await protocol.WriteEepromAsync(kv.Key, Convert.FromBase64String(kv.Value));
                 appliedZone = "";
                 lblColorState.Text = "已恢复原色";
-                if (showMessage) MessageBox.Show("原始 DPI 颜色已恢复。", "U2 电量灯", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (showMessage) MessageBox.Show("原始 DPI 颜色已恢复。", "鼠标电量灯", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                if (showMessage) MessageBox.Show(ex.Message, "恢复失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                lblColorState.Text = "恢复失败";
+                MessageBox.Show(ex.Message, "恢复失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { busy = wasBusy; SetControls(true); }
         }
@@ -1249,18 +1392,22 @@ namespace U2BatteryLight
         {
             if (monitoring)
             {
-                MessageBox.Show("请先停止监控并设置好你想保留的 DPI 原色，再重新记录。", "U2 电量灯", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("请先停止监控并设置好你想保留的 DPI 原色，再重新记录。", "鼠标电量灯", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
             if (MessageBox.Show("重新记录会替换现有原色备份。继续吗？", "重新记录", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             busy = true; SetControls(false);
             try
             {
-                settings.Backups.Clear(); settings.DeviceSignature = "";
                 MouseSnapshot snap = await protocol.FindAndReadAsync();
+                settings.Backups.Clear(); settings.DeviceSignature = "";
+                int count = Math.Max(1, (snap.DpiCount + 1) / 2);
+                for (int i = 0; i < count; i++)
+                    settings.Backups[protocol.Profile.ColorAddresses[i]] = Convert.ToBase64String(await protocol.ReadEepromAsync(protocol.Profile.ColorAddresses[i], 8));
+                settings.DeviceSignature = snap.Signature;
                 await EnsureBackupsAsync(snap);
                 lblColorState.Text = "已记录原色";
-                MessageBox.Show("已记录 " + settings.Backups.Count * 2 + " 个 DPI 档位的原始颜色。", "U2 电量灯", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("已记录 " + settings.Backups.Count * 2 + " 个 DPI 档位的原始颜色。", "鼠标电量灯", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex) { MessageBox.Show(ex.Message, "记录失败", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             finally { busy = false; SetControls(true); }
@@ -1271,7 +1418,7 @@ namespace U2BatteryLight
             UpdateTrayNumber(b.Percent.ToString(CultureInfo.InvariantCulture));
             lblBattery.Text = b.Percent + "%";
             lblDetail.Text = (b.Charging ? "充电中" : "使用电池") + " · " + b.Millivolts + " mV · " + DateTime.Now.ToString("HH:mm:ss");
-            tray.Text = ("U2 电量灯 · " + b.Percent + "%").Substring(0, Math.Min(63, ("U2 电量灯 · " + b.Percent + "%").Length));
+            tray.Text = ("鼠标电量灯 · " + b.Percent + "%").Substring(0, Math.Min(63, ("鼠标电量灯 · " + b.Percent + "%").Length));
         }
         [DllImport("user32.dll")]
         private static extern bool DestroyIcon(IntPtr icon);
@@ -1326,6 +1473,7 @@ namespace U2BatteryLight
         }
         private void SetControls(bool enabled)
         {
+            cboDevice.Enabled = enabled && !monitoring;
             btnToggle.Enabled = enabled; btnRefresh.Enabled = enabled; btnRestore.Enabled = enabled; btnRecapture.Enabled = enabled;
             btnApplyEffect.Enabled = enabled;
         }
